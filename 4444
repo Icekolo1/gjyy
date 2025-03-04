@@ -1,1 +1,622 @@
-ffgfg
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from PIL import Image, ImageTk
+import os
+import sqlite3
+import shutil
+import json
+
+class MachineryApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("Машинери")
+        master.geometry("1280x800")
+        master.minsize(1024, 600)
+
+        # Пути и настройки
+        self.image_folder = "error_images"
+        self.models_folder = "images"
+        self.current_image_paths = []
+        self.current_model = None
+
+        try:
+            master.iconbitmap('icon.ico')
+        except Exception as e:
+            print(f"Ошибка загрузки иконки: {e}")
+
+        # Инициализация компонентов
+        self.setup_styles()
+        self.setup_database()
+        self.create_main_menu()
+
+    def setup_styles(self):
+        """Настройка современных стилей"""
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+
+        # Цветовая схема
+        self.bg_color = '#1a1a1a'
+        self.fg_color = '#ffffff'
+        self.accent_color = '#2d2d2d'
+        self.highlight_color = '#4a9eda'
+        self.error_color = '#ff4444'
+        self.success_color = '#44ff44'
+
+        # Конфигурация стилей
+        self.style.configure('.',
+                            background=self.bg_color,
+                            foreground=self.fg_color,
+                            font=('Segoe UI', 11))
+
+        self.style.configure('TNotebook.Tab',
+                            font=('Segoe UI', 12, 'bold'),
+                            padding=[15, 5],
+                            background=self.accent_color)
+
+        self.style.configure('Title.TLabel',
+                            font=('Segoe UI', 24, 'bold'),
+                            foreground=self.highlight_color)
+
+        # Стили для кнопок
+        self.style.configure('TButton',
+                            font=('Segoe UI', 11),
+                            padding=8,
+                            background=self.accent_color,
+                            borderwidth=0)
+        self.style.map('TButton',
+                      background=[('active', self.highlight_color)],
+                      foreground=[('active', self.fg_color)])
+
+        # Стили для полей ввода
+        self.style.configure('TEntry',
+                            fieldbackground='#333333',
+                            foreground=self.fg_color,
+                            insertcolor=self.fg_color,
+                            borderwidth=1,
+                            relief='solid')
+
+        # Стили для текстовых полей
+        self.text_bg = '#333333'
+        self.text_fg = self.fg_color
+
+    def setup_database(self):
+        """Инициализация базы данных"""
+        self.conn = sqlite3.connect('machinery.db')
+        self.cursor = self.conn.cursor()
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS errors
+                            (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                             model TEXT,
+                             code TEXT,
+                             description TEXT,
+                             solution TEXT,
+                             image_paths TEXT)''')
+        self.conn.commit()
+
+    def create_main_menu(self):
+        """Главное меню с выбором моделей"""
+        self.main_frame = ttk.Frame(self.master)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Заголовок
+        ttk.Label(self.main_frame,
+                 text="Выберите модель оборудования",
+                 style='Title.TLabel').pack(pady=30)
+
+        # Панель управления
+        control_frame = ttk.Frame(self.main_frame)
+        control_frame.pack(pady=20)
+        
+        ttk.Button(control_frame,
+                  text="Экспорт базы данных",
+                  command=self.export_database).grid(row=0, column=0, padx=10)
+        ttk.Button(control_frame,
+                  text="Импорт базы данных",
+                  command=self.import_database).grid(row=0, column=1, padx=10)
+
+        # Область с моделями
+        self.models_canvas = tk.Canvas(self.main_frame, bg=self.bg_color)
+        scrollbar = ttk.Scrollbar(self.main_frame, 
+                                orient="vertical", 
+                                command=self.models_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.models_canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.models_canvas.configure(
+                scrollregion=self.models_canvas.bbox("all")
+            )
+        )
+
+        self.models_canvas.create_window((0, 0), 
+                                       window=self.scrollable_frame, 
+                                       anchor="nw")
+        self.models_canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.models_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self.load_model_images()
+
+    def load_model_images(self):
+        """Загрузка изображений моделей в адаптивную сетку"""
+        if not os.path.exists(self.models_folder):
+            os.makedirs(self.models_folder)
+            messagebox.showinfo("Информация", f"Создана папка {self.models_folder}")
+            return
+
+        images = [f for f in os.listdir(self.models_folder)
+                if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+
+        row = col = 0
+        max_cols = 3
+
+        for img_file in images:
+            img_path = os.path.join(self.models_folder, img_file)
+            try:
+                img = Image.open(img_path)
+                img = img.resize((300, 240), Image.Resampling.LANCZOS)
+                img_tk = ImageTk.PhotoImage(img)
+
+                model_name = os.path.splitext(img_file)[0]
+
+                card_frame = ttk.Frame(self.scrollable_frame)
+                card_frame.grid(row=row, column=col, padx=15, pady=15)
+
+                btn = ttk.Button(card_frame,
+                               image=img_tk,
+                               command=lambda m=model_name: self.open_model(m))
+                btn.image = img_tk
+                btn.pack()
+
+                ttk.Label(card_frame,
+                         text=model_name,
+                         font=('Segoe UI', 12)).pack(pady=5)
+
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            except Exception as e:
+                print(f"Ошибка загрузки {img_file}: {str(e)}")
+
+    def open_model(self, model_name):
+        """Открытие интерфейса для работы с выбранной моделью"""
+        self.current_model = model_name
+        self.main_frame.destroy()
+        self.create_work_interface()
+
+    def create_work_interface(self):
+        """Создание рабочего интерфейса"""
+        self.main_frame = ttk.Frame(self.master)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        # Шапка
+        header_frame = ttk.Frame(self.main_frame)
+        header_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(header_frame,
+                 text="← Назад",
+                 command=self.return_to_main_menu).pack(side=tk.LEFT)
+        
+        ttk.Label(header_frame,
+                 text=f"Модель: {self.current_model}",
+                 style='Title.TLabel').pack(side=tk.LEFT, padx=20)
+
+        # Вкладки
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        self.create_search_tab()
+        self.create_edit_tab()
+
+        # Статусная строка
+        self.status_bar = ttk.Label(self.main_frame,
+                                  text="Готово к работе",
+                                  relief=tk.SUNKEN,
+                                  font=('Segoe UI', 10))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def create_search_tab(self):
+        """Вкладка поиска ошибок"""
+        search_frame = ttk.Frame(self.notebook)
+        
+        # Панель поиска
+        search_panel = ttk.Frame(search_frame)
+        search_panel.pack(pady=15, padx=20, fill=tk.X)
+        
+        ttk.Label(search_panel, text="Поиск по коду ошибки:").pack(side=tk.LEFT)
+        self.search_entry = ttk.Entry(search_panel, width=30, font=('Segoe UI', 12))
+        self.search_entry.pack(side=tk.LEFT, padx=10)
+        
+        ttk.Button(search_panel,
+                 text="Найти",
+                 command=self.search_error).pack(side=tk.LEFT)
+
+        # Область результатов
+        result_frame = ttk.Frame(search_frame)
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Текстовое поле с прокруткой
+        text_scroll = ttk.Scrollbar(result_frame)
+        self.result_text = tk.Text(result_frame,
+                                 wrap=tk.WORD,
+                                 font=('Segoe UI', 11),
+                                 bg=self.text_bg,
+                                 fg=self.text_fg,
+                                 yscrollcommand=text_scroll.set)
+        text_scroll.config(command=self.result_text.yview)
+        
+        self.result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Область изображений
+        self.result_images_frame = ttk.LabelFrame(result_frame, text="Изображения")
+        self.result_images_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10)
+
+        self.notebook.add(search_frame, text="Поиск ошибок")
+
+    def create_edit_tab(self):
+        """Вкладка редактирования ошибок"""
+        edit_frame = ttk.Frame(self.notebook)
+
+        # Форма редактирования
+        form_frame = ttk.Frame(edit_frame)
+        form_frame.pack(pady=20, padx=20, fill=tk.BOTH)
+
+        fields = [
+            ("Код ошибки:", 'entry', 'code_entry'),
+            ("Описание:", 'text', 'desc_text'),
+            ("Решение:", 'text', 'solution_text'),
+            ("Изображения:", 'images', 'image_panel')
+        ]
+
+        for label_text, field_type, field_name in fields:
+            row = ttk.Frame(form_frame)
+            row.pack(fill=tk.X, pady=8)
+
+            ttk.Label(row, text=label_text, width=12).pack(side=tk.LEFT)
+
+            if field_type == 'entry':
+                entry = ttk.Entry(row)
+                entry.pack(fill=tk.X, expand=True)
+                setattr(self, field_name, entry)
+            elif field_type == 'text':
+                text = tk.Text(row, height=5, wrap=tk.WORD,
+                               bg=self.text_bg,
+                               fg=self.text_fg,
+                               insertbackground=self.fg_color)
+                text.pack(fill=tk.BOTH, expand=True)
+                setattr(self, field_name, text)
+            elif field_type == 'images':
+                btn_frame = ttk.Frame(row)
+                btn_frame.pack(fill=tk.X)
+
+                ttk.Button(btn_frame,
+                         text="Добавить изображения",
+                         command=self.load_images).pack(side=tk.LEFT)
+                ttk.Button(btn_frame,
+                         text="Очистить изображения",
+                         command=self.remove_images).pack(side=tk.LEFT)
+
+                self.image_preview_frame = ttk.Frame(row)
+                self.image_preview_frame.pack()
+
+        # Панель управления
+        control_frame = ttk.Frame(edit_frame)
+        control_frame.pack(pady=20)
+
+        ttk.Button(control_frame,
+                 text="Добавить",
+                 command=self.add_error).pack(side=tk.LEFT, padx=10)
+        ttk.Button(control_frame,
+                 text="Обновить",
+                 command=self.update_error).pack(side=tk.LEFT, padx=10)
+        ttk.Button(control_frame,
+                 text="Удалить",
+                 command=self.delete_error).pack(side=tk.LEFT, padx=10)
+        ttk.Button(control_frame,
+                 text="Очистить",
+                 command=self.clear_form).pack(side=tk.LEFT, padx=10)
+
+        self.notebook.add(edit_frame, text="Управление ошибками")
+
+    def load_images(self):
+        """Загрузка изображений для ошибки"""
+        filetypes = [("Изображения", "*.png *.jpg *.jpeg")]
+        file_paths = filedialog.askopenfilenames(filetypes=filetypes)
+
+        if file_paths:
+            if not os.path.exists(self.image_folder):
+                os.makedirs(self.image_folder)
+
+            for file_path in file_paths:
+                filename = f"{self.current_model}_{os.path.basename(file_path)}"
+                dest_path = os.path.join(self.image_folder, filename)
+                shutil.copyfile(file_path, dest_path)
+                self.current_image_paths.append(dest_path)
+
+            self.show_image_previews()
+
+    def show_image_previews(self):
+        """Показ миниатюр изображений"""
+        for widget in self.image_preview_frame.winfo_children():
+            widget.destroy()
+
+        for img_path in self.current_image_paths:
+            try:
+                img = Image.open(img_path)
+                img.thumbnail((100, 100))
+                photo = ImageTk.PhotoImage(img)
+
+                img_label = ttk.Label(self.image_preview_frame, image=photo)
+                img_label.image = photo
+                img_label.pack(side=tk.LEFT, padx=5)
+                img_label.bind("<Button-1>", lambda e, path=img_path: self.show_full_image(path))
+            except Exception as e:
+                print(f"Ошибка загрузки изображения {img_path}: {str(e)}")
+
+    def show_full_image(self, path):
+        """Отображение полного размера изображения"""
+        top = tk.Toplevel(self.master)
+        top.title("Просмотр изображения")
+        top.geometry("1024x768")
+
+        control_frame = ttk.Frame(top)
+        control_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(control_frame,
+                 text="Увеличить",
+                 command=lambda: self.zoom_image(1.2)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame,
+                 text="Уменьшить",
+                 command=lambda: self.zoom_image(0.8)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame,
+                 text="Сбросить",
+                 command=self.reset_zoom).pack(side=tk.LEFT, padx=5)
+
+        self.canvas = tk.Canvas(top, bg=self.bg_color, cursor="crosshair")
+        h_scroll = ttk.Scrollbar(top, orient="horizontal", command=self.canvas.xview)
+        v_scroll = ttk.Scrollbar(top, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.original_image = Image.open(path)
+        self.current_scale = 1.0
+        self.update_canvas_image()
+
+        self.canvas.bind("<MouseWheel>", self.mouse_wheel_handler)
+        self.canvas.bind("<ButtonPress-1>", self.start_pan)
+        self.canvas.bind("<B1-Motion>", self.pan_image)
+
+    def update_canvas_image(self):
+        """Обновление изображения на холсте"""
+        width = int(self.original_image.width * self.current_scale)
+        height = int(self.original_image.height * self.current_scale)
+        resized_image = self.original_image.resize((width, height), Image.Resampling.LANCZOS)
+        self.tk_image = ImageTk.PhotoImage(resized_image)
+        
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image)
+        self.canvas.configure(scrollregion=self.canvas.bbox(tk.ALL))
+
+    def zoom_image(self, factor):
+        """Масштабирование изображения"""
+        self.current_scale *= factor
+        self.update_canvas_image()
+
+    def reset_zoom(self):
+        """Сброс масштаба"""
+        self.current_scale = 1.0
+        self.update_canvas_image()
+
+    def mouse_wheel_handler(self, event):
+        """Обработка колеса мыши"""
+        if event.delta > 0:
+            self.zoom_image(1.1)
+        else:
+            self.zoom_image(0.9)
+
+    def start_pan(self, event):
+        """Начало перемещения изображения"""
+        self.canvas.scan_mark(event.x, event.y)
+
+    def pan_image(self, event):
+        """Перемещение изображения"""
+        self.canvas.scan_dragto(event.x, event.y, gain=1)
+
+    def add_error(self):
+        """Добавление новой ошибки"""
+        code = self.code_entry.get().strip().upper()
+        desc = self.desc_text.get("1.0", tk.END).strip()
+        solution = self.solution_text.get("1.0", tk.END).strip()
+        image_paths = json.dumps(self.current_image_paths)
+
+        if not code or not desc or not solution:
+            self.update_status("Заполните обязательные поля", self.error_color)
+            return
+
+        try:
+            self.cursor.execute('''INSERT INTO errors 
+                                (model, code, description, solution, image_paths)
+                                VALUES (?, ?, ?, ?, ?)''',
+                                (self.current_model, code, desc, solution, image_paths))
+            self.conn.commit()
+            self.update_status("Ошибка успешно добавлена", self.success_color)
+            self.clear_form()
+        except sqlite3.IntegrityError:
+            self.update_status("Ошибка: такой код уже существует", self.error_color)
+
+    def search_error(self):
+        """Поиск ошибки по коду"""
+        code = self.search_entry.get().strip().upper()
+        if not code:
+            self.update_status("Введите код ошибки", self.error_color)
+            return
+
+        self.cursor.execute('''SELECT code, description, solution, image_paths
+                            FROM errors 
+                            WHERE model=? AND code=?''',
+                            (self.current_model, code))
+        result = self.cursor.fetchone()
+
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+
+        if result:
+            output = (f"Код: {result[0]}\n\n"
+                      f"Описание:\n{result[1]}\n\n"
+                      f"Решение:\n{result[2]}")
+            self.result_text.insert(tk.END, output)
+
+            if result[3]:
+                image_paths = json.loads(result[3])
+                self.show_result_images(image_paths)
+
+            self.update_status("Запись найдена", self.success_color)
+        else:
+            self.result_text.insert(tk.END, "Ошибка не найдена")
+            self.update_status("Запись отсутствует", self.error_color)
+
+        self.result_text.config(state=tk.DISABLED)
+
+    def show_result_images(self, image_paths):
+        """Отображение изображений в результатах поиска"""
+        for widget in self.result_images_frame.winfo_children():
+            widget.destroy()
+
+        for img_path in image_paths:
+            try:
+                img = Image.open(img_path)
+                img.thumbnail((150, 150))
+                photo = ImageTk.PhotoImage(img)
+
+                img_label = ttk.Label(self.result_images_frame, image=photo)
+                img_label.image = photo
+                img_label.pack(side=tk.LEFT, padx=5)
+                img_label.bind("<Button-1>", lambda e, path=img_path: self.show_full_image(path))
+            except Exception as e:
+                print(f"Ошибка загрузки изображения {img_path}: {str(e)}")
+
+    def update_error(self):
+        """Обновление данных об ошибке"""
+        code = self.code_entry.get().strip().upper()
+        desc = self.desc_text.get("1.0", tk.END).strip()
+        solution = self.solution_text.get("1.0", tk.END).strip()
+        image_paths = json.dumps(self.current_image_paths)
+
+        if not code or not desc or not solution:
+            self.update_status("Заполните обязательные поля", self.error_color)
+            return
+
+        try:
+            self.cursor.execute('''UPDATE errors 
+                                SET description=?, solution=?, image_paths=?
+                                WHERE model=? AND code=?''',
+                                (desc, solution, image_paths,
+                                 self.current_model, code))
+
+            if self.cursor.rowcount == 0:
+                self.update_status("Ошибка не найдена", self.error_color)
+            else:
+                self.conn.commit()
+                self.update_status("Данные обновлены", self.success_color)
+                self.clear_form()
+        except Exception as e:
+            self.update_status(f"Ошибка обновления: {str(e)}", self.error_color)
+
+    def delete_error(self):
+        """Удаление ошибки"""
+        code = self.code_entry.get().strip().upper()
+        if not code:
+            self.update_status("Введите код ошибки", self.error_color)
+            return
+
+        self.cursor.execute('''SELECT image_paths FROM errors
+                            WHERE model=? AND code=?''',
+                            (self.current_model, code))
+        result = self.cursor.fetchone()
+
+        self.cursor.execute('''DELETE FROM errors 
+                            WHERE model=? AND code=?''',
+                            (self.current_model, code))
+
+        if self.cursor.rowcount > 0:
+            if result and result[0]:
+                image_paths = json.loads(result[0])
+                for img_path in image_paths:
+                    try:
+                        os.remove(img_path)
+                    except Exception as e:
+                        print(f"Ошибка удаления изображения {img_path}: {str(e)}")
+
+            self.conn.commit()
+            self.update_status("Ошибка удалена", self.success_color)
+            self.clear_form()
+        else:
+            self.update_status("Ошибка не найдена", self.error_color)
+
+    def clear_form(self):
+        """Очистка формы ввода"""
+        self.code_entry.delete(0, tk.END)
+        self.desc_text.delete("1.0", tk.END)
+        self.solution_text.delete("1.0", tk.END)
+        self.remove_images()
+        self.update_status("Форма очищена")
+
+    def remove_images(self):
+        """Удаление прикрепленных изображений"""
+        self.current_image_paths = []
+        for widget in self.image_preview_frame.winfo_children():
+            widget.destroy()
+
+    def export_database(self):
+        """Экспорт базы данных"""
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".db",
+            filetypes=[("SQLite Database", "*.db")]
+        )
+        if file_path:
+            try:
+                shutil.copyfile('machinery.db', file_path)
+                self.update_status("База данных успешно экспортирована", self.success_color)
+            except Exception as e:
+                self.update_status(f"Ошибка экспорта: {str(e)}", self.error_color)
+
+    def import_database(self):
+        """Импорт базы данных"""
+        file_path = filedialog.askopenfilename(
+            filetypes=[("SQLite Database", "*.db")]
+        )
+        if file_path:
+            try:
+                shutil.copyfile(file_path, 'machinery.db')
+                self.update_status("База данных успешно импортирована", self.success_color)
+                self.return_to_main_menu()
+            except Exception as e:
+                self.update_status(f"Ошибка импорта: {str(e)}", self.error_color)
+
+    def return_to_main_menu(self):
+        """Возврат в главное меню"""
+        self.main_frame.destroy()
+        self.current_model = None
+        self.create_main_menu()
+
+    def update_status(self, message, color=None):
+        """Обновление статусной строки"""
+        self.status_bar.config(text=message)
+        if color:
+            self.status_bar.config(foreground=color)
+
+    def __del__(self):
+        """Закрытие соединения с БД"""
+        if hasattr(self, 'conn'):
+            self.conn.close()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MachineryApp(root)
+    root.mainloop()
